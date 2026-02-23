@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Church Setlist Builder Pro</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #121212; color: #e0e0e0; margin: 0; }
+        .container { max-width: 800px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        h2 { text-align: center; color: #bb86fc; margin-top: 0; }
+        
+        .input-group { margin-bottom: 12px; }
+        label { font-weight: bold; font-size: 13px; color: #bb86fc; display: block; margin-bottom: 5px; }
+        
+        input, select, textarea { 
+            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; 
+            box-sizing: border-box; font-size: 14px; background: #2c2c2c; color: #fff;
+        }
+        input:focus, select:focus, textarea:focus { border-color: #bb86fc; outline: none; }
+
+        textarea { height: 150px; font-family: 'Courier New', monospace; font-size: 16px; resize: vertical; }
+
+        .controls { display: flex; gap: 10px; margin-bottom: 20px; margin-top: 15px; }
+        button { padding: 12px; font-size: 14px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; flex: 1; transition: 0.3s; }
+        .btn-blue { background: #3700b3; }
+        .btn-green { background: #03dac6; color: #000; }
+        .btn-red { background: #cf6679; }
+        button:hover { opacity: 0.8; transform: translateY(-2px); }
+        
+        #output { 
+            white-space: pre-wrap; background: #252525; padding: 15px; border-radius: 10px; 
+            border: 2px dashed #bb86fc; font-family: 'Courier New', monospace; font-size: 16px; 
+            line-height: 1.5; margin-bottom: 20px; color: #f1c40f; /* Chords will look yellow */
+        }
+        
+        .history { border-top: 2px solid #333; margin-top: 25px; padding-top: 20px; }
+        .setlist-item { 
+            background: #2c2c2c; padding: 15px; border-radius: 10px; margin-bottom: 12px; 
+            border-left: 6px solid #bb86fc; display: flex; justify-content: space-between; align-items: center;
+        }
+        .set-info { cursor: pointer; flex-grow: 1; }
+        .set-title { font-weight: bold; font-size: 16px; color: #fff; display: block; margin-bottom: 5px; }
+        .set-meta { font-size: 13px; color: #b0b0b0; }
+        .tag { font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; margin-right: 8px; }
+        .tag-opening { background: #018786; }
+        .tag-praise { background: #6200ee; }
+        .tag-worship { background: #b00020; }
+        
+        .ref-link { color: #03dac6; text-decoration: none; font-size: 12px; display: block; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Church Setlist Builder Pro</h2>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div class="input-group">
+            <label>Service Date</label>
+            <input type="date" id="serviceDate">
+        </div>
+        <div class="input-group">
+            <label>Worship Leader</label>
+            <input type="text" id="worshipLeader" placeholder="Name of Leader">
+        </div>
+    </div>
+
+    <div class="input-group">
+        <label>Song Category & Title</label>
+        <div style="display: flex; gap: 8px;">
+            <select id="category" style="flex: 1;">
+                <option value="Opening">Opening</option>
+                <option value="Praise">Praise</option>
+                <option value="Worship">Worship</option>
+            </select>
+            <input type="text" id="songTitle" placeholder="Song Title" style="flex: 2;">
+        </div>
+    </div>
+
+    <div class="input-group">
+        <label>Reference Link (YouTube/Spotify)</label>
+        <input type="url" id="refLink" placeholder="https://youtube.com/...">
+    </div>
+    
+    <label>Chords & Lyrics (Transposable)</label>
+    <textarea id="inputChords" placeholder="Paste chords and lyrics here..."></textarea>
+
+    <div class="controls">
+        <button class="btn-blue" onclick="changeKey(-1)">-1 Semitone</button>
+        <button class="btn-blue" onclick="changeKey(1)">+1 Semitone</button>
+        <button class="btn-green" onclick="saveSong()">💾 Save to Setlist</button>
+        <button class="btn-red" onclick="resetText()">Clear All</button>
+    </div>
+
+    <label>Live Preview:</label>
+    <div id="output">Your transposed song will appear here...</div>
+
+    <div class="history">
+        <h3>Your Saved Setlist Items</h3>
+        <div id="savedSongsList"></div>
+    </div>
+</div>
+
+<script>
+    const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+    let currentShift = 0;
+
+    document.getElementById('serviceDate').valueAsDate = new Date();
+
+    function transposeChord(chord, semitones) {
+        if (chord.includes('/')) return chord.split('/').map(p => transposeChord(p, semitones)).join('/');
+        const match = chord.match(/^([A-G][#b]?)(.*)$/);
+        if (!match) return chord;
+        const [_, root, suffix] = match;
+        let index = SHARPS.indexOf(root);
+        if (index === -1) index = FLATS.indexOf(root);
+        if (index === -1) return chord;
+        let newIndex = (index + semitones) % 12;
+        if (newIndex < 0) newIndex += 12;
+        const useFlats = semitones < 0 || FLATS.includes(root);
+        return (useFlats ? FLATS[newIndex] : SHARPS[newIndex]) + suffix;
+    }
+
+    function transposeText(text, semitones) {
+        const chordRegex = /\b[A-G][#b]?(?:m|maj|min|dim|aug|sus|add|M|[0-9]|\/)*\b/g;
+        return text.replace(chordRegex, (match) => transposeChord(match, semitones));
+    }
+
+    function changeKey(amount) {
+        currentShift += amount;
+        updateDisplay();
+    }
+
+    function updateDisplay() {
+        const text = document.getElementById('inputChords').value;
+        document.getElementById('output').innerText = text ? transposeText(text, currentShift) : "Live Preview...";
+    }
+
+    function saveSong() {
+        const date = document.getElementById('serviceDate').value;
+        const leader = document.getElementById('worshipLeader').value || "No Leader";
+        const title = document.getElementById('songTitle').value || "Untitled Song";
+        const cat = document.getElementById('category').value;
+        const link = document.getElementById('refLink').value;
+        const content = document.getElementById('output').innerText;
+        
+        if (!document.getElementById('inputChords').value) return alert("Paki-lagay muna ang chords!");
+
+        const songs = JSON.parse(localStorage.getItem('churchSetlistFinal') || '[]');
+        songs.push({ date, leader, title, cat, link, content, id: Date.now() });
+        localStorage.setItem('churchSetlistFinal', JSON.stringify(songs));
+        
+        loadSongs();
+        alert("Song added to your lineup!");
+    }
+
+    function loadSongs() {
+        const songs = JSON.parse(localStorage.getItem('churchSetlistFinal') || '[]');
+        const list = document.getElementById('savedSongsList');
+        
+        const order = {"Opening": 1, "Praise": 2, "Worship": 3};
+        songs.sort((a, b) => new Date(b.date) - new Date(a.date) || order[a.cat] - order[b.cat]);
+
+        list.innerHTML = songs.map(s => {
+            const tagClass = `tag-${s.cat.toLowerCase()}`;
+            return `
+                <div class="setlist-item">
+                    <div class="set-info" onclick="viewSong(${s.id})">
+                        <span class="set-title"><span class="tag ${tagClass}">${s.cat}</span> ${s.title}</span>
+                        <span class="set-meta">📅 ${s.date} | 🎤 Leader: ${s.leader}</span>
+                        ${s.link ? `<a href="${s.link}" target="_blank" class="ref-link">🔗 View Reference</a>` : ''}
+                    </div>
+                    <button class="btn-red" style="flex:none; padding: 10px;" onclick="deleteSong(${s.id})">🗑️</button>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function deleteSong(id) {
+        if(!confirm("Remove this song from the lineup?")) return;
+        let songs = JSON.parse(localStorage.getItem('churchSetlistFinal') || '[]');
+        songs = songs.filter(s => s.id !== id);
+        localStorage.setItem('churchSetlistFinal', JSON.stringify(songs));
+        loadSongs();
+    }
+
+    function viewSong(id) {
+        const songs = JSON.parse(localStorage.getItem('churchSetlistFinal') || '[]');
+        const s = songs.find(s => s.id === id);
+        document.getElementById('inputChords').value = s.content;
+        document.getElementById('songTitle').value = s.title;
+        document.getElementById('worshipLeader').value = s.leader;
+        document.getElementById('serviceDate').value = s.date;
+        document.getElementById('category').value = s.cat;
+        document.getElementById('refLink').value = s.link || "";
+        currentShift = 0;
+        updateDisplay();
+    }
+
+    function resetText() {
+        currentShift = 0;
+        document.getElementById('inputChords').value = "";
+        document.getElementById('songTitle').value = "";
+        document.getElementById('refLink').value = "";
+        updateDisplay();
+    }
+
+    loadSongs();
+</script>
+
+</body>
+</html>
